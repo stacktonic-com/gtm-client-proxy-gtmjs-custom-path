@@ -1,11 +1,3 @@
-___TERMS_OF_SERVICE___
-
-By creating or modifying this file you agree to Google Tag Manager's Community
-Template Gallery Developer Terms of Service available at
-https://developers.google.com/tag-manager/gallery-tos (or such other URL as
-Google may provide), as modified from time to time.
-
-
 ___INFO___
 
 {
@@ -34,7 +26,15 @@ ___TEMPLATE_PARAMETERS___
     "displayName": "Custom pathname gtm.js",
     "simpleValueType": true,
     "defaultValue": "/gtm.js",
-    "help": "Pathname, start with /"
+    "help": "Pathname, start with /",
+    "valueValidators": [
+      {
+        "type": "REGEX",
+        "args": [
+          "^/.*$"
+        ]
+      }
+    ]
   },
   {
     "type": "SIMPLE_TABLE",
@@ -61,9 +61,12 @@ const getRequestHeader = require('getRequestHeader');
 const getRequestPath = require('getRequestPath');
 const getRequestQueryParameters = require('getRequestQueryParameters');
 const setResponseBody = require('setResponseBody');
+const setResponseStatus = require('setResponseStatus');
 const setResponseHeader = require('setResponseHeader');
+const sendHttpGet = require('sendHttpGet');
 const returnResponse = require('returnResponse');
 
+const httpEndpoint = 'https://www.googletagmanager.com/gtm.js?fps=s';
 const pathname = data.pathnameGtm || '/gtm.js';
 
 // Check the configured requestpath for the gtm.js library
@@ -76,6 +79,10 @@ if (getRequestPath() == pathname) {
 	const allowedContainerIdsArray = [];
 	const queryParameters = getRequestQueryParameters();
 	const gtmContainerId = queryParameters.id;
+    const gtmAuth = queryParameters.gtm_auth;
+	const gtmPreview = queryParameters.gtm_preview;
+    const gtmDebug = queryParameters.gtm_debug;
+	const gtmDatalayerName = queryParameters.l || 'dataLayer';
 	
 	for (let i=0; i < allowedContainerIds.length; i++) {
 		allowedContainerIdsArray.push(allowedContainerIds[i].gtm_container_id);
@@ -83,27 +90,45 @@ if (getRequestPath() == pathname) {
 
 	if (allowedContainerIdsArray.indexOf(gtmContainerId)  !== -1) {
 
-		getGoogleScript('GTM', (script, metadata) => {
-
-			// Pass headers
-			for (let header in metadata) {
-				setResponseHeader(header, metadata[header]);
-			}
+      
+        if (!!(gtmAuth && gtmDebug && gtmPreview)) {
+          
+			// See https://www.simoahava.com/analytics/custom-gtm-loader-server-side-tagging/. No support in the getGoogleScript API for previewing containers.
+			sendHttpGet(httpEndpoint + '&id=' + gtmContainerId + '&l=' + gtmDatalayerName + '&gtm_auth=' + gtmAuth + '&gtm_debug=' + gtmDebug + '&gtm_preview=' + gtmPreview, (statusCode, headers, body) => {
+				setResponseStatus(statusCode);
+				setResponseBody(body);
+				for (const key in headers) {
+					// Do not set the "expires" and "date" headers
+					if (['expires', 'date'].indexOf(key) === -1) setResponseHeader(key, headers[key]);
+				}
+				returnResponse();
+			}, {timeout: 1500});
 			
-			setResponseHeader('content-type', 'text/javascript');
-			setResponseBody(script);
+        } else {
 
-			// Handle CORS
-			const origin = getRequestHeader('Origin');
-			if (origin) {
-				setResponseHeader('Access-Control-Allow-Origin', origin);
-				setResponseHeader('Access-Control-Allow-Credentials', 'true');
-			}
-	
-			// Return the response
-			returnResponse();
+			getGoogleScript('GTM', (script, metadata) => {
+
+				// Pass headers
+				for (let header in metadata) {
+					setResponseHeader(header, metadata[header]);
+				}
+				
+				setResponseHeader('content-type', 'text/javascript');
+				setResponseBody(script);
+
+				// Handle CORS
+				const origin = getRequestHeader('Origin');
+				if (origin) {
+					setResponseHeader('Access-Control-Allow-Origin', origin);
+					setResponseHeader('Access-Control-Allow-Credentials', 'true');
+				}
+		
+				// Return the response
+				returnResponse();
+				
+			}, {'id': gtmContainerId});
 			
-		}, {'id': gtmContainerId});
+        }
 	}
 }
 
